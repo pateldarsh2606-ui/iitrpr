@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, FormEvent, useEffect, useCallback } from 'react';
+import { useState, FormEvent, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Heart, Mail, Lock, User, ArrowLeft, Loader2, AlertCircle, Building2, Hash, ShieldCheck } from 'lucide-react';
@@ -32,9 +32,9 @@ export default function AuthPage() {
   const [entryNumber, setEntryNumber] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [otp, setOtp] = useState('');
   const [cooldown, setCooldown] = useState(0);
-  const [info, setInfo] = useState<string | null>(null);
 
   const validateEmail = (val: string) => {
     if (!val) return 'Email is required';
@@ -42,44 +42,35 @@ export default function AuthPage() {
     return null;
   };
 
-  const isRateLimitError = (msg: string) => {
-    const m = msg.toLowerCase();
-    return (
-      m.includes('rate limit') ||
-      m.includes('too many') ||
-      m.includes('after 60 seconds') ||
-      m.includes('security purposes') ||
-      m.includes('email rate') ||
-      m.includes('for security reasons')
-    );
-  };
-
-  const startCooldown = useCallback((seconds: number = RESEND_COOLDOWN) => {
-    setCooldown(seconds);
-  }, []);
-
   useEffect(() => {
     if (cooldown <= 0) return;
     const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
     return () => clearTimeout(timer);
   }, [cooldown]);
 
-  const sendOtp = useCallback(async (emailAddress: string) => {
-    const { error: resendError } = await supabase.auth.resend({
-      type: 'signup',
-      email: emailAddress,
+  const callEdgeFunction = async (name: string, body: Record<string, unknown>) => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
+    const url = `${supabaseUrl}/functions/v1/${name}`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${anonKey}`,
+        apikey: anonKey,
+      },
+      body: JSON.stringify(body),
     });
-    if (resendError) {
-      if (isRateLimitError(resendError.message)) {
-        setError('Too many emails sent. Please wait a minute before requesting another code.');
-        startCooldown(RESEND_COOLDOWN);
-      } else {
-        throw resendError;
-      }
-    } else {
-      startCooldown(RESEND_COOLDOWN);
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data?.error || `Request failed (${res.status})`);
     }
-  }, [startCooldown]);
+
+    return data;
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -106,58 +97,22 @@ export default function AuthPage() {
           return;
         }
 
-        const { data, error: signUpError } = await supabase.auth.signUp({
+        await callEdgeFunction('send-otp', {
           email,
+          full_name: fullName.trim(),
+          department,
+          entry_number: entryNumber.trim().toUpperCase(),
           password,
-          options: {
-            data: {
-              full_name: fullName.trim(),
-              department,
-              entry_number: entryNumber.trim().toUpperCase(),
-            },
-          },
         });
 
-        if (signUpError) {
-          if (isRateLimitError(signUpError.message)) {
-            setError('Too many attempts. Please wait a minute before trying again.');
-            startCooldown(RESEND_COOLDOWN);
-          } else if (signUpError.message.toLowerCase().includes('already registered')) {
-            // User exists but may not have verified their email yet.
-            // Switch to OTP step and resend the code.
-            setStep('otp');
-            setInfo(`We sent a 6-digit verification code to ${email}. Enter it below to activate your account.`);
-            await sendOtp(email);
-          } else {
-            throw signUpError;
-          }
-          setLoading(false);
-          return;
-        }
-
-        if (data.session && data.user) {
-          // Email confirmation is off — proceed directly.
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .upsert({
-              id: data.user.id,
-              full_name: fullName.trim(),
-              department,
-              entry_number: entryNumber.trim().toUpperCase(),
-            }, { onConflict: 'id' });
-          if (profileError) throw profileError;
-          router.push('/dashboard');
-        } else {
-          // Email confirmation is on — OTP was sent.
-          setStep('otp');
-          setInfo(`We sent a 6-digit verification code to ${email}. Enter it below to activate your account.`);
-          startCooldown(RESEND_COOLDOWN);
-          setLoading(false);
-        }
+        setStep('otp');
+        setInfo(`We sent a 6-digit verification code to ${email}. Enter it below to activate your account.`);
+        setCooldown(RESEND_COOLDOWN);
+        setLoading(false);
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) {
-          if (isRateLimitError(signInError.message)) {
+          if (signInError.message.toLowerCase().includes('rate limit') || signInError.message.toLowerCase().includes('too many')) {
             setError('Too many attempts. Please wait a minute before trying again.');
           } else {
             setError('Invalid email or password. Please try again.');
@@ -168,12 +123,15 @@ export default function AuthPage() {
         router.push('/dashboard');
       }
     } catch (err) {
-      const message = err instanceof Error
-        ? err.message
-        : typeof err === 'object' && err !== null && 'message' in err && typeof err.message === 'string'
-        ? err.message
-        : 'Something went wrong';
-      setError(isRateLimitError(message) ? 'Too many attempts. Please wait a minute before trying again.' : message);
+      const message = err instanceof Error ? err.message : 'Something went wrong';
+      if (message.toLowerCase().includes('already registered')) {
+        setError('This email is already registered. Try signing in instead.');
+      } else if (message.includes('wait') && message.includes('s ')) {
+        setError(message);
+        setCooldown(RESEND_COOLDOWN);
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -188,43 +146,33 @@ export default function AuthPage() {
     setError(null);
 
     try {
-      const { data, error: verifyError } = await supabase.auth.verifyOtp({
-        email,
-        token: otp,
-        type: 'signup',
-      });
+      await callEdgeFunction('verify-otp', { email, code: otp });
 
-      if (verifyError) {
-        if (isRateLimitError(verifyError.message)) {
-          setError('Too many attempts. Please wait a minute before trying again.');
-        } else if (verifyError.message.toLowerCase().includes('expired') || verifyError.message.toLowerCase().includes('invalid') || verifyError.message.toLowerCase().includes('incorrect')) {
-          setError('That code is invalid or expired. Click "Resend code" to get a new one.');
-        } else {
-          throw verifyError;
-        }
+      // Account created — sign in with the credentials
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+      if (signInError) {
+        setError('Account verified! Please sign in with your email and password.');
+        setMode('signin');
+        setStep('form');
+        setOtp('');
         setLoading(false);
         return;
       }
-
-      if (data.session && data.user) {
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .upsert({
-            id: data.user.id,
-            full_name: fullName.trim() || (data.user.user_metadata?.full_name as string) || '',
-            department: department || (data.user.user_metadata?.department as string) || DEPARTMENTS[0],
-            entry_number: (entryNumber.trim().toUpperCase()) || ((data.user.user_metadata?.entry_number as string) || '').toUpperCase(),
-          }, { onConflict: 'id' });
-        if (profileError) throw profileError;
-        router.push('/dashboard');
-      }
+      router.push('/dashboard');
     } catch (err) {
-      const message = err instanceof Error
-        ? err.message
-        : typeof err === 'object' && err !== null && 'message' in err && typeof err.message === 'string'
-        ? err.message
-        : 'Failed to verify code';
-      setError(isRateLimitError(message) ? 'Too many attempts. Please wait a minute before trying again.' : message);
+      const message = err instanceof Error ? err.message : 'Failed to verify code';
+      if (message.toLowerCase().includes('expired')) {
+        setError('This code has expired. Click "Resend code" to get a new one.');
+      } else if (message.toLowerCase().includes('invalid') || message.toLowerCase().includes('no verification')) {
+        setError(message);
+      } else if (message.toLowerCase().includes('already registered')) {
+        setError('This email is already registered. Try signing in instead.');
+        setMode('signin');
+        setStep('form');
+        setOtp('');
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -235,15 +183,22 @@ export default function AuthPage() {
     setError(null);
     setLoading(true);
     try {
-      await sendOtp(email);
+      await callEdgeFunction('send-otp', {
+        email,
+        full_name: fullName.trim(),
+        department,
+        entry_number: entryNumber.trim().toUpperCase(),
+        password,
+      });
       setInfo(`A new code was sent to ${email}.`);
+      setCooldown(RESEND_COOLDOWN);
     } catch (err) {
-      const message = err instanceof Error
-        ? err.message
-        : typeof err === 'object' && err !== null && 'message' in err && typeof err.message === 'string'
-        ? err.message
-        : 'Failed to resend code';
-      setError(isRateLimitError(message) ? 'Too many emails sent. Please wait a minute before requesting another.' : message);
+      const message = err instanceof Error ? err.message : 'Failed to resend code';
+      if (message.toLowerCase().includes('already registered')) {
+        setError('This email is already registered. Try signing in instead.');
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -487,7 +442,7 @@ export default function AuthPage() {
                     {loading ? (
                       <Loader2 className="h-5 w-5 animate-spin" />
                     ) : mode === 'signup' ? (
-                      'Create Account'
+                      'Send Verification Code'
                     ) : (
                       'Sign In'
                     )}
