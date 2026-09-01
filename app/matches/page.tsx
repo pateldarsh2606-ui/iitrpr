@@ -62,7 +62,7 @@ function Matches() {
     loadMatches();
   }, [loadMatches]);
 
-  // Real-time: listen for new matches
+  // Real-time: listen for new matches and match cancellations
   useEffect(() => {
     if (!profile) return;
     const channel = supabase
@@ -72,9 +72,20 @@ function Matches() {
         { event: 'INSERT', schema: 'public', table: 'matches' },
         () => loadMatches()
       )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'matches' },
+        (payload) => {
+          const deletedId = (payload.old as { id: string }).id;
+          setMatches((prev) => prev.filter((m) => m.id !== deletedId));
+          if (activeMatchId === deletedId) {
+            setActiveMatchId(null);
+          }
+        }
+      )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [profile, loadMatches]);
+  }, [profile, loadMatches, activeMatchId]);
 
   const activeMatch = matches.find((m) => m.id === activeMatchId);
 
