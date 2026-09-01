@@ -3,28 +3,20 @@
 import { useState, FormEvent, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Heart, Mail, Lock, User, ArrowLeft, Loader2, AlertCircle, Building2, Hash, ShieldCheck } from 'lucide-react';
+import { Heart, Mail, Lock, User, ArrowLeft, Loader2, AlertCircle, Building2, Hash } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { DEPARTMENTS } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from '@/components/ui/input-otp';
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@iitrpr\.ac\.in$/;
-const RESEND_COOLDOWN = 60;
 
 type Mode = 'signin' | 'signup';
-type Step = 'form' | 'otp';
 
 export default function AuthPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>('signup');
-  const [step, setStep] = useState<Step>('form');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -33,53 +25,57 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const [otp, setOtp] = useState('');
-  const [cooldown, setCooldown] = useState(0);
 
-  const validateEmail = (val: string) => {
-    if (!val) return 'Email is required';
-    if (!EMAIL_REGEX.test(val)) return 'Only @iitrpr.ac.in emails are allowed';
+  const validateEmail = (value: string) => {
+    if (!value) return 'Email is required';
+    if (!EMAIL_REGEX.test(value)) return 'Only @iitrpr.ac.in emails are allowed';
     return null;
   };
 
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [cooldown]);
+  const handleGoogle = async () => {
+    setLoading(true);
+    setError(null);
+    setInfo(null);
 
-  const callEdgeFunction = async (name: string, body: Record<string, unknown>) => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
-    const url = `${supabaseUrl}/functions/v1/${name}`;
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${anonKey}`,
-        apikey: anonKey,
-      },
-      body: JSON.stringify(body),
+    const redirectTo = `${window.location.origin}/auth`;
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo },
     });
 
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      throw new Error(data?.error || `Request failed (${res.status})`);
+    if (oauthError) {
+      setError(oauthError.message);
+      setLoading(false);
     }
-
-    return data;
   };
 
-  const handleSubmit = async (e: FormEvent) => {
+  useEffect(() => {
+    const handleOAuthReturn = async () => {
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+      if (!user) return;
+
+      const userEmail = user.email?.toLowerCase() ?? '';
+      if (!EMAIL_REGEX.test(userEmail)) {
+        await supabase.auth.signOut();
+        setError('Please use your IIT Ropar Google account (@iitrpr.ac.in).');
+        return;
+      }
+
+      router.replace('/dashboard');
+    };
+
+    handleOAuthReturn();
+  }, [router]);
+
+  const handlePasswordSignIn = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setInfo(null);
 
-    const emailErr = validateEmail(email);
-    if (emailErr) {
-      setError(emailErr);
+    const emailError = validateEmail(email);
+    if (emailError) {
+      setError(emailError);
       return;
     }
     if (password.length < 6) {
@@ -88,134 +84,30 @@ export default function AuthPage() {
     }
 
     setLoading(true);
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
-    try {
-      if (mode === 'signup') {
-        if (!fullName.trim() || !entryNumber.trim()) {
-          setError('Please fill in all fields');
-          setLoading(false);
-          return;
-        }
-
-        await callEdgeFunction('send-otp', {
-          email,
-          full_name: fullName.trim(),
-          department,
-          entry_number: entryNumber.trim().toUpperCase(),
-          password,
-        });
-
-        setStep('otp');
-        setInfo(`We sent a 6-digit verification code to ${email}. Enter it below to activate your account.`);
-        setCooldown(RESEND_COOLDOWN);
-        setLoading(false);
-      } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-        if (signInError) {
-          if (signInError.message.toLowerCase().includes('rate limit') || signInError.message.toLowerCase().includes('too many')) {
-            setError('Too many attempts. Please wait a minute before trying again.');
-          } else {
-            setError('Invalid email or password. Please try again.');
-          }
-          setLoading(false);
-          return;
-        }
-        router.push('/dashboard');
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Something went wrong';
-      if (message.toLowerCase().includes('already registered')) {
-        setError('This email is already registered. Try signing in instead.');
-      } else if (message.includes('wait') && message.includes('s ')) {
-        setError(message);
-        setCooldown(RESEND_COOLDOWN);
-      } else {
-        setError(message);
-      }
-    } finally {
+    if (signInError) {
+      const message = signInError.message.toLowerCase();
+      setError(message.includes('rate limit') || message.includes('too many')
+        ? 'Too many attempts. Please wait a minute before trying again.'
+        : 'Invalid email or password. Please try again.');
       setLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (otp.length !== 6) {
-      setError('Please enter the 6-digit code');
       return;
     }
-    setLoading(true);
-    setError(null);
 
-    try {
-      await callEdgeFunction('verify-otp', { email, code: otp });
-
-      // Account created — sign in with the credentials
-      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-      if (signInError) {
-        setError('Account verified! Please sign in with your email and password.');
-        setMode('signin');
-        setStep('form');
-        setOtp('');
-        setLoading(false);
-        return;
-      }
-      router.push('/dashboard');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to verify code';
-      if (message.toLowerCase().includes('expired')) {
-        setError('This code has expired. Click "Resend code" to get a new one.');
-      } else if (message.toLowerCase().includes('invalid') || message.toLowerCase().includes('no verification')) {
-        setError(message);
-      } else if (message.toLowerCase().includes('already registered')) {
-        setError('This email is already registered. Try signing in instead.');
-        setMode('signin');
-        setStep('form');
-        setOtp('');
-      } else {
-        setError(message);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResendOtp = async () => {
-    if (cooldown > 0) return;
-    setError(null);
-    setLoading(true);
-    try {
-      await callEdgeFunction('send-otp', {
-        email,
-        full_name: fullName.trim(),
-        department,
-        entry_number: entryNumber.trim().toUpperCase(),
-        password,
-      });
-      setInfo(`A new code was sent to ${email}.`);
-      setCooldown(RESEND_COOLDOWN);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to resend code';
-      if (message.toLowerCase().includes('already registered')) {
-        setError('This email is already registered. Try signing in instead.');
-      } else {
-        setError(message);
-      }
-    } finally {
-      setLoading(false);
-    }
+    router.push('/dashboard');
   };
 
   const switchMode = (newMode: Mode) => {
     setMode(newMode);
-    setStep('form');
     setError(null);
     setInfo(null);
-    setOtp('');
-    setCooldown(0);
+    setEmail('');
+    setPassword('');
   };
 
   return (
     <div className="min-h-screen bg-romantic-glow">
-      {/* Floating orbs */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-40 -left-40 h-96 w-96 rounded-full bg-primary/10 blur-3xl animate-float" />
         <div className="absolute bottom-0 -right-40 h-80 w-80 rounded-full bg-accent/10 blur-3xl animate-float" style={{ animationDelay: '2s' }} />
@@ -229,231 +121,72 @@ export default function AuthPage() {
           </Link>
 
           <div className="glass-card rounded-3xl border border-border p-8 shadow-2xl">
-            {step === 'otp' ? (
-              <>
-                <div className="mb-8 text-center">
-                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-accent shadow-lg shadow-primary/30">
-                    <ShieldCheck className="h-7 w-7 text-white" />
-                  </div>
-                  <h1 className="font-display text-2xl font-bold">Verify your email</h1>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Enter the 6-digit code we sent to your IIT Ropar email
-                  </p>
+            <div className="mb-8 text-center">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-accent shadow-lg shadow-primary/30">
+                <Heart className="h-7 w-7 text-white" fill="white" />
+              </div>
+              <h1 className="font-display text-2xl font-bold">
+                {mode === 'signup' ? 'Join Prom Match' : 'Welcome back'}
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {mode === 'signup' ? 'Use your IIT Ropar Google account to join' : 'Sign in to find your match'}
+              </p>
+            </div>
+
+            <div className="mb-6 flex rounded-full border border-border bg-secondary/50 p-1">
+              <button type="button" onClick={() => switchMode('signup')} className={`flex-1 rounded-full py-2 text-sm font-medium transition ${mode === 'signup' ? 'bg-gradient-to-r from-primary to-accent text-white' : 'text-muted-foreground hover:text-foreground'}`}>Sign up</button>
+              <button type="button" onClick={() => switchMode('signin')} className={`flex-1 rounded-full py-2 text-sm font-medium transition ${mode === 'signin' ? 'bg-gradient-to-r from-primary to-accent text-white' : 'text-muted-foreground hover:text-foreground'}`}>Sign in</button>
+            </div>
+
+            <Button
+              type="button"
+              onClick={handleGoogle}
+              disabled={loading}
+              className="w-full h-11 rounded-full border border-border bg-background text-foreground font-semibold shadow-sm hover:bg-secondary disabled:opacity-60"
+            >
+              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <><span className="mr-2 text-lg font-bold">G</span>Continue with Google</>}
+            </Button>
+
+            <div className="my-6 flex items-center gap-3">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-xs text-muted-foreground">existing accounts</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+
+            <form onSubmit={handlePasswordSignIn} className="space-y-4">
+              {mode === 'signup' && (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
+                  New accounts are created through Google. After signing in, you'll be asked for your department and entry number.
                 </div>
+              )}
 
-                {info && (
-                  <div className="mb-4 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-primary flex items-start gap-2">
-                    <Mail className="h-4 w-4 mt-0.5 shrink-0" />
-                    <span>{info}</span>
-                  </div>
-                )}
-
-                <div className="space-y-6">
-                  <div className="flex flex-col items-center gap-2">
-                    <InputOTP
-                      maxLength={6}
-                      value={otp}
-                      onChange={(val) => setOtp(val)}
-                      autoFocus
-                    >
-                      <InputOTPGroup className="gap-2">
-                        <InputOTPSlot index={0} className="h-12 w-12 rounded-lg text-lg" />
-                        <InputOTPSlot index={1} className="h-12 w-12 rounded-lg text-lg" />
-                        <InputOTPSlot index={2} className="h-12 w-12 rounded-lg text-lg" />
-                        <InputOTPSlot index={3} className="h-12 w-12 rounded-lg text-lg" />
-                        <InputOTPSlot index={4} className="h-12 w-12 rounded-lg text-lg" />
-                        <InputOTPSlot index={5} className="h-12 w-12 rounded-lg text-lg" />
-                      </InputOTPGroup>
-                    </InputOTP>
-                  </div>
-
-                  {error && (
-                    <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive flex items-start gap-2">
-                      <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                      <span>{error}</span>
-                    </div>
-                  )}
-
-                  <Button
-                    onClick={handleVerifyOtp}
-                    disabled={loading || otp.length !== 6}
-                    className="w-full h-11 rounded-full bg-gradient-to-r from-primary to-accent text-white font-semibold shadow-lg shadow-primary/25 hover:brightness-110 disabled:opacity-60"
-                  >
-                    {loading ? (
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                    ) : (
-                      'Verify & Continue'
-                    )}
-                  </Button>
-
-                  <div className="flex items-center justify-between text-sm">
-                    <button
-                      type="button"
-                      onClick={() => { setStep('form'); setError(null); setInfo(null); setOtp(''); }}
-                      className="flex items-center gap-1 text-muted-foreground transition hover:text-foreground"
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                      Back
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleResendOtp}
-                      disabled={cooldown > 0 || loading}
-                      className="font-medium text-primary transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
-                    </button>
-                  </div>
+              <div className="space-y-2">
+                <Label htmlFor="email">IIT Ropar Email</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your.name@iitrpr.ac.in" className="pl-10" autoComplete="email" />
                 </div>
-              </>
-            ) : (
-              <>
-                <div className="mb-8 text-center">
-                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-accent shadow-lg shadow-primary/30">
-                    <Heart className="h-7 w-7 text-white" fill="white" />
-                  </div>
-                  <h1 className="font-display text-2xl font-bold">
-                    {mode === 'signup' ? 'Join Prom Match' : 'Welcome back'}
-                  </h1>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {mode === 'signup' ? 'Create your account with your IIT Ropar email' : 'Sign in to find your match'}
-                  </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="pl-10" autoComplete="current-password" />
                 </div>
+              </div>
 
-                {/* Mode toggle */}
-                <div className="mb-6 flex rounded-full border border-border bg-secondary/50 p-1">
-                  <button
-                    type="button"
-                    onClick={() => switchMode('signup')}
-                    className={`flex-1 rounded-full py-2 text-sm font-medium transition ${mode === 'signup' ? 'bg-gradient-to-r from-primary to-accent text-white' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    Sign up
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => switchMode('signin')}
-                    className={`flex-1 rounded-full py-2 text-sm font-medium transition ${mode === 'signin' ? 'bg-gradient-to-r from-primary to-accent text-white' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    Sign in
-                  </button>
-                </div>
+              {error && <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive flex items-start gap-2"><AlertCircle className="h-4 w-4 mt-0.5 shrink-0" /><span>{error}</span></div>}
+              {info && <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-primary">{info}</div>}
 
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  {mode === 'signup' && (
-                    <>
-                      <div className="space-y-2">
-                        <Label htmlFor="name">Full Name</Label>
-                        <div className="relative">
-                          <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          <Input
-                            id="name"
-                            value={fullName}
-                            onChange={(e) => setFullName(e.target.value)}
-                            placeholder="Aarav Sharma"
-                            className="pl-10"
-                            autoComplete="name"
-                          />
-                        </div>
-                      </div>
+              <Button type="submit" disabled={loading} className="w-full h-11 rounded-full bg-gradient-to-r from-primary to-accent text-white font-semibold shadow-lg shadow-primary/25 hover:brightness-110 disabled:opacity-60">
+                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Sign In with Email & Password'}
+              </Button>
+            </form>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="dept">Department</Label>
-                        <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground z-10" />
-                          <select
-                            id="dept"
-                            value={department}
-                            onChange={(e) => setDepartment(e.target.value)}
-                            className="flex h-10 w-full appearance-none rounded-md border border-input bg-background pl-10 pr-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                          >
-                            {DEPARTMENTS.map((d) => (
-                              <option key={d} value={d}>{d}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="entry">Entry Number</Label>
-                        <div className="relative">
-                          <Hash className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          <Input
-                            id="entry"
-                            value={entryNumber}
-                            onChange={(e) => setEntryNumber(e.target.value)}
-                            placeholder="2023CSB107"
-                            className="pl-10"
-                          />
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  <div className="space-y-2">
-                    <Label htmlFor="email">IIT Ropar Email</Label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        id="email"
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="your.name@iitrpr.ac.in"
-                        className="pl-10"
-                        autoComplete="email"
-                      />
-                    </div>
-                    {email && validateEmail(email) && (
-                      <p className="text-xs text-destructive flex items-center gap-1">
-                        <AlertCircle className="h-3 w-3" />
-                        {validateEmail(email)}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="password">Password</Label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        id="password"
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="••••••••"
-                        className="pl-10"
-                        autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                      />
-                    </div>
-                  </div>
-
-                  {error && (
-                    <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive flex items-start gap-2">
-                      <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                      <span>{error}</span>
-                    </div>
-                  )}
-
-                  <Button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full h-11 rounded-full bg-gradient-to-r from-primary to-accent text-white font-semibold shadow-lg shadow-primary/25 hover:brightness-110 disabled:opacity-60"
-                  >
-                    {loading ? (
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                    ) : mode === 'signup' ? (
-                      'Send Verification Code'
-                    ) : (
-                      'Sign In'
-                    )}
-                  </Button>
-                </form>
-
-                <p className="mt-6 text-center text-xs text-muted-foreground">
-                  Only students with a verified <span className="text-primary font-medium">@iitrpr.ac.in</span> email can join.
-                </p>
-              </>
-            )}
+            <p className="mt-6 text-center text-xs text-muted-foreground">
+              Only students with a verified <span className="text-primary font-medium">@iitrpr.ac.in</span> Google account can join.
+            </p>
           </div>
         </div>
       </div>
