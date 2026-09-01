@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 5.5%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 5.5%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 346 77% 57%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 6% 12%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 6% 12%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 340 82% 62%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 6% 16%;
+    --input: 240 6% 16%;
+    --ring: 346 77% 57%;
+    --chart-1: 346 77% 57%;
+    --chart-2: 340 82% 62%;
+    --chart-3: 280 65% 60%;
+    --chart-4: 220 70% 50%;
+    --chart-5: 160 60% 45%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer utilities {
+  .text-gradient-romantic {
+    background: linear-gradient(135deg, hsl(346 77% 67%), hsl(340 82% 62%), hsl(20 80% 60%));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .bg-romantic-glow {
+    background: radial-gradient(ellipse at top, hsla(346, 77%, 57%, 0.18), transparent 60%),
+      radial-gradient(ellipse at bottom right, hsla(340, 82%, 62%, 0.12), transparent 50%);
+  }
+
+  .glass-card {
+    background: hsl(240 10% 5.5% / 0.7);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  .animate-pulse-glow {
+    animation: pulseGlow 2.5s ease-in-out infinite;
+  }
+
+  .animate-fade-in-up {
+    animation: fadeInUp 0.6s ease-out both;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(240 6% 12%) 0%,
+      hsl(240 6% 18%) 50%,
+      hsl(240 6% 12%) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 20px hsla(346, 77%, 57%, 0.3); }
+  50% { box-shadow: 0 0 40px hsla(346, 77%, 57%, 0.6); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(240 10% 3.9%);
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(240 6% 20%);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(346 77% 40%);
+}
