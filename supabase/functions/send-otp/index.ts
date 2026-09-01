@@ -40,7 +40,7 @@ async function sendEmail(email: string, code: string, fullName: string): Promise
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: "Prom Match <noreply@prommatch.in>",
+      from: "Prom Match <onboarding@resend.dev>",
       to: [email],
       subject: "Your Prom Match verification code",
       html: `<!DOCTYPE html>
