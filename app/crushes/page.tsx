@@ -171,13 +171,29 @@ function Crushes() {
           <p className="mt-2 text-muted-foreground">Choose privately with Secret Crushes, or make your interest known with a Crush Request.</p>
         </div>
 
+        <section className="mb-8 rounded-2xl border border-primary/20 bg-card/60 p-5 backdrop-blur-md">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
+              <Sparkles className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <h2 className="font-semibold">What's the difference?</h2>
+              <div className="mt-2 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
+                <p><span className="font-medium text-foreground">🔒 Secret Crush:</span> Pick up to {MAX_CRUSHES}. They won't know unless they pick you too.</p>
+                <p><span className="font-medium text-foreground">💌 Crush Request:</span> They know you sent it and can accept or decline. Requests don't use your {MAX_CRUSHES} Secret Crush slots.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {incomingRequests.length > 0 && (
           <section className="mb-8 rounded-2xl border border-primary/20 bg-card/60 p-5 backdrop-blur-md">
             <div className="mb-4 flex items-center gap-2">
               <Inbox className="h-5 w-5 text-primary" />
-              <h2 className="text-lg font-semibold">Crush Requests</h2>
+              <h2 className="text-lg font-semibold">Incoming Crush Requests</h2>
               <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{incomingRequests.length}</span>
             </div>
+            <p className="mb-4 text-sm text-muted-foreground">People who have chosen to make their interest known to you.</p>
             <div className="grid gap-3 sm:grid-cols-2">
               {incomingRequests.map((request) => {
                 const sender = students.find((s) => s.id === request.sender_id);
@@ -203,13 +219,41 @@ function Crushes() {
         <section className="mb-8 rounded-2xl border border-border bg-card/50 p-5 backdrop-blur-md">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <div className="flex items-center gap-2"><Heart className="h-5 w-5 text-primary" /><h2 className="text-lg font-semibold">Secret Crush</h2></div>
+              <div className="flex items-center gap-2"><Heart className="h-5 w-5 text-primary" /><h2 className="text-lg font-semibold">Secret Crushes</h2></div>
               <p className="mt-1 text-sm text-muted-foreground">Pick up to {MAX_CRUSHES}. Nobody can see your choices unless they pick you too.</p>
             </div>
             <div className="text-sm font-medium">{crushes.length}/{MAX_CRUSHES} selected · {remaining} left</div>
           </div>
           <div className="mt-4 flex gap-1.5">{Array.from({ length: MAX_CRUSHES }).map((_, i) => <div key={i} className={`h-2 flex-1 rounded-full ${i < crushes.length ? 'bg-gradient-to-r from-primary to-accent' : 'bg-secondary'}`} />)}</div>
         </section>
+
+        {outgoingRequests.length > 0 && (
+          <section className="mb-8 rounded-2xl border border-border bg-card/50 p-5 backdrop-blur-md">
+            <div className="mb-4 flex items-center gap-2">
+              <Send className="h-5 w-5 text-primary" />
+              <h2 className="text-lg font-semibold">Sent Crush Requests</h2>
+              <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-semibold text-muted-foreground">{outgoingRequests.length}</span>
+            </div>
+            <p className="mb-4 text-sm text-muted-foreground">These requests are separate from your Secret Crush limit. They can see that you sent them a request.</p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {outgoingRequests.map((request) => {
+                const recipient = students.find((s) => s.id === request.recipient_id);
+                if (!recipient) return null;
+                const statusLabel = request.status === 'pending' ? 'Pending' : request.status === 'accepted' ? 'Accepted · Matched' : 'Declined';
+                return (
+                  <div key={request.id} className="flex items-center gap-3 rounded-xl border border-border bg-background/50 p-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 font-semibold text-primary">{initials(recipient.full_name)}</div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{recipient.full_name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{recipient.department}</p>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${request.status === 'accepted' ? 'bg-primary/10 text-primary' : request.status === 'declined' ? 'bg-destructive/10 text-destructive' : 'bg-secondary text-muted-foreground'}`}>{statusLabel}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         <div className="relative mb-6">
           <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
@@ -244,7 +288,7 @@ function Crushes() {
                       disabled={requestBusy === student.id || !!request || matched}
                       className="h-10 rounded-full text-xs"
                     >
-                      {matched || request?.status === 'accepted' ? <><Check className="h-4 w-4" /> Matched</> : request?.status === 'pending' ? <><Check className="h-4 w-4" /> Sent</> : request?.status === 'declined' ? <><X className="h-4 w-4" /> Declined</> : <><Send className="h-4 w-4" /> Request</>}
+                      {matched || request?.status === 'accepted' ? <><Check className="h-4 w-4" /> Matched</> : request?.status === 'pending' ? <><Check className="h-4 w-4" /> Sent</> : request?.status === 'declined' ? <><X className="h-4 w-4" /> Declined</> : <><Send className="h-4 w-4" /> Crush Request</>}
                     </Button>
                   </div>
                 </div>
@@ -253,7 +297,7 @@ function Crushes() {
           </div>
         )}
 
-        {crushes.length === MAX_CRUSHES && <div className="mt-6 flex items-center justify-center gap-2 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-center text-sm text-primary"><Sparkles className="h-4 w-4" /> You've picked all {MAX_CRUSHES} secret crushes. Now sit back and wait for a match!</div>}
+        {crushes.length === MAX_CRUSHES && <div className="mt-6 flex items-center justify-center gap-2 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-center text-sm text-primary"><Sparkles className="h-4 w-4" /> You've picked all {MAX_CRUSHES} secret crushes. Crush Requests are still available separately!</div>}
       </div>
     </div>
   );
