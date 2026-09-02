@@ -4,6 +4,11 @@ export interface Profile {
   department: string;
   entry_number: string;
   bio: string | null;
+  favorite_music?: string | null;
+  favorite_movie?: string | null;
+  interests?: string[];
+  vibe?: string | null;
+  ideal_prom?: string | null;
   created_at: string;
 }
 
@@ -12,6 +17,15 @@ export interface Crush {
   chooser_id: string;
   crush_id: string;
   created_at: string;
+}
+
+export interface CrushRequest {
+  id: string;
+  sender_id: string;
+  recipient_id: string;
+  status: 'pending' | 'accepted' | 'declined';
+  created_at: string;
+  responded_at: string | null;
 }
 
 export interface Match {
@@ -48,3 +62,5 @@ export const DEPARTMENTS = [
 ] as const;
 
 export const MAX_CRUSHES = 3;
+
+export const VIBES = ['Chill', 'Adventurous', 'Funny', 'Creative', 'Competitive', 'Introvert-ish', 'Social', 'Chaotic'] as const;
