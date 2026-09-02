@@ -10,12 +10,12 @@ VALUES (
   'avatars',
   'avatars',
   false,
-  5242880,
+  2097152,
   ARRAY['image/jpeg', 'image/png', 'image/webp']
 )
 ON CONFLICT (id) DO UPDATE SET
   public = false,
-  file_size_limit = 5242880,
+  file_size_limit = 2097152,
   allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp'];
 
 DROP POLICY IF EXISTS "avatars_select_authenticated" ON storage.objects;
