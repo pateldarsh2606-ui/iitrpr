@@ -1,7 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { Heart, Search, MessageCircle, Sparkles, ArrowRight, Shield } from 'lucide-react';
+import {
+  Heart,
+  Search,
+  MessageCircle,
+  Sparkles,
+  ArrowRight,
+  Shield,
+  Send,
+  UserRound,
+  BarChart3,
+  UserX,
+} from 'lucide-react';
 
 export default function LandingPage() {
   return (
@@ -64,11 +75,43 @@ export default function LandingPage() {
 
       {/* Features */}
       <section className="relative z-10 mx-auto max-w-5xl px-6 pb-24">
-        <div className="grid gap-6 sm:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {[
-            { icon: Search, title: 'Browse the directory', desc: 'Search through verified IIT Ropar students by name, department, or entry number.' },
-            { icon: Heart, title: 'Pick up to 3 crushes', desc: 'Your choices stay completely secret. Nobody knows unless they pick you back.' },
-            { icon: MessageCircle, title: 'Chat with matches', desc: "When it's mutual, we unlock a private real-time chat. No match, no access." },
+            {
+              icon: Search,
+              title: 'Browse the directory',
+              desc: 'Find verified IIT Ropar students by name, department, or interests and get to know them before making a move.',
+            },
+            {
+              icon: Heart,
+              title: 'Secret Crush',
+              desc: 'Pick up to 3 people you like. Your choices stay completely secret unless they choose you too.',
+            },
+            {
+              icon: Send,
+              title: 'Crush Requests',
+              desc: 'Want to be a little more direct? Send someone a crush request and let them accept or decline.',
+            },
+            {
+              icon: UserRound,
+              title: 'Make your profile yours',
+              desc: 'Show off your music, movies, interests, vibe, bio, and your idea of the perfect Prom night.',
+            },
+            {
+              icon: MessageCircle,
+              title: 'Chat with your matches',
+              desc: 'When the feeling is mutual, unlock a private real-time chat with conversation starters to break the ice.',
+            },
+            {
+              icon: BarChart3,
+              title: 'Campus Stats',
+              desc: 'See fun, anonymous campus-wide trends like popular departments, vibes, and how many matches are happening.',
+            },
+            {
+              icon: UserX,
+              title: 'Unmatch anytime',
+              desc: 'Changed your mind? You can unmatch and your conversation is removed for both people.',
+            },
           ].map((f, i) => (
             <div
               key={f.title}
