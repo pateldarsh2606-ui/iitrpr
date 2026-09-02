@@ -4,6 +4,7 @@ export interface Profile {
   department: string;
   entry_number: string;
   bio: string | null;
+  avatar_path?: string | null;
   favorite_music?: string | null;
   favorite_movie?: string | null;
   interests?: string[];
