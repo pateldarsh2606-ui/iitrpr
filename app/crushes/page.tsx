@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth-context';
 import { AppNav, AuthGate } from '@/components/app-nav';
 import { MatchModal } from '@/components/match-modal';
 import { ConfettiOverlay, useConfetti } from '@/components/confetti';
-import type { Profile, Crush, CrushRequest } from '@/lib/types';
+import type { Profile, Crush, CrushRequest, Match } from '@/lib/types';
 import { MAX_CRUSHES } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 
@@ -20,6 +20,7 @@ function Crushes() {
   const [crushes, setCrushes] = useState<Crush[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<CrushRequest[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<CrushRequest[]>([]);
+  const [matchedIds, setMatchedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [requestBusy, setRequestBusy] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -52,12 +53,24 @@ function Crushes() {
     if (!outgoing.error && outgoing.data) setOutgoingRequests(outgoing.data as CrushRequest[]);
   }, [profile]);
 
+  const loadMatches = useCallback(async () => {
+    if (!profile) return;
+    const { data, error } = await supabase
+      .from('matches')
+      .select('*')
+      .or(`user_a.eq.${profile.id},user_b.eq.${profile.id}`);
+    if (!error && data) {
+      const ids = (data as Match[]).map((m) => m.user_a === profile.id ? m.user_b : m.user_a);
+      setMatchedIds(new Set(ids));
+    }
+  }, [profile]);
+
   useEffect(() => {
     (async () => {
-      await Promise.all([loadStudents(), loadCrushes(), loadRequests()]);
+      await Promise.all([loadStudents(), loadCrushes(), loadRequests(), loadMatches()]);
       setLoading(false);
     })();
-  }, [loadStudents, loadCrushes, loadRequests]);
+  }, [loadStudents, loadCrushes, loadRequests, loadMatches]);
 
   useEffect(() => {
     if (!profile) return;
@@ -67,6 +80,7 @@ function Crushes() {
         const newMatch = payload.new as { user_a: string; user_b: string };
         if (newMatch.user_a === profile.id || newMatch.user_b === profile.id) {
           const otherId = newMatch.user_a === profile.id ? newMatch.user_b : newMatch.user_a;
+          setMatchedIds((current) => new Set(current).add(otherId));
           const { data: otherProfile } = await supabase.from('profiles').select('full_name').eq('id', otherId).maybeSingle();
           if (otherProfile) {
             fire();
@@ -74,9 +88,22 @@ function Crushes() {
           }
         }
       })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'matches' }, (payload) => {
+        const deleted = payload.old as { user_a?: string; user_b?: string };
+        if (deleted.user_a && deleted.user_b && (deleted.user_a === profile.id || deleted.user_b === profile.id)) {
+          const otherId = deleted.user_a === profile.id ? deleted.user_b : deleted.user_a;
+          setMatchedIds((current) => {
+            const next = new Set(current);
+            next.delete(otherId);
+            return next;
+          });
+        } else {
+          loadMatches();
+        }
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [profile, fire]);
+  }, [profile, fire, loadMatches]);
 
   const selectedIds = useMemo(() => new Set(crushes.map((c) => c.crush_id)), [crushes]);
   const outgoingByRecipient = useMemo(() => new Map(outgoingRequests.map((r) => [r.recipient_id, r])), [outgoingRequests]);
@@ -104,24 +131,17 @@ function Crushes() {
   };
 
   const sendRequest = async (studentId: string) => {
-    if (!profile || requestBusy) return;
+    if (!profile || requestBusy || matchedIds.has(studentId)) return;
     setRequestBusy(studentId);
     const existing = outgoingByRecipient.get(studentId);
-    let error = null;
-
     if (existing) {
-      if (existing.status === 'pending') {
-        setRequestBusy(null);
-        return;
-      }
-      const deleted = await supabase.from('crush_requests').delete().eq('id', existing.id);
-      error = deleted.error;
+      setRequestBusy(null);
+      return;
     }
 
-    if (!error) {
-      const result = await supabase.from('crush_requests').insert({ sender_id: profile.id, recipient_id: studentId }).select().single();
-      error = result.error;
-    }
+    const { error } = await supabase
+      .from('crush_requests')
+      .insert({ sender_id: profile.id, recipient_id: studentId });
 
     if (!error) await loadRequests();
     setRequestBusy(null);
@@ -130,7 +150,9 @@ function Crushes() {
   const respondToRequest = async (request: CrushRequest, status: 'accepted' | 'declined') => {
     setRequestBusy(request.id);
     const { error } = await supabase.from('crush_requests').update({ status, responded_at: new Date().toISOString() }).eq('id', request.id);
-    if (!error) await loadRequests();
+    if (!error) {
+      await Promise.all([loadRequests(), status === 'accepted' ? loadMatches() : Promise.resolve()]);
+    }
     setRequestBusy(null);
   };
 
@@ -204,6 +226,7 @@ function Crushes() {
               const selected = selectedIds.has(student.id);
               const disabled = !selected && crushes.length >= MAX_CRUSHES;
               const request = outgoingByRecipient.get(student.id);
+              const matched = matchedIds.has(student.id);
               return (
                 <div key={student.id} className={`glass-card rounded-2xl border p-5 transition animate-fade-in-up ${selected ? 'border-primary/50 shadow-lg shadow-primary/10' : 'border-border hover:border-primary/30'}`} style={{ animationDelay: `${Math.min(idx * 0.03, 0.5)}s` }}>
                   <div className="flex items-start gap-4">
@@ -215,8 +238,13 @@ function Crushes() {
                     <Button onClick={() => toggleCrush(student.id)} disabled={disabled} className={`h-10 rounded-full text-xs font-medium ${selected ? 'bg-secondary text-foreground hover:bg-destructive/10 hover:text-destructive' : 'bg-gradient-to-r from-primary to-accent text-white hover:brightness-110'}`}>
                       {selected ? <><X className="h-4 w-4" /> Remove</> : <><Heart className="h-4 w-4" /> Secret Crush</>}
                     </Button>
-                    <Button variant="outline" onClick={() => sendRequest(student.id)} disabled={requestBusy === student.id || request?.status === 'pending'} className="h-10 rounded-full text-xs">
-                      {request?.status === 'pending' ? <><Check className="h-4 w-4" /> Sent</> : <><Send className="h-4 w-4" /> Request</>}
+                    <Button
+                      variant="outline"
+                      onClick={() => sendRequest(student.id)}
+                      disabled={requestBusy === student.id || !!request || matched}
+                      className="h-10 rounded-full text-xs"
+                    >
+                      {matched || request?.status === 'accepted' ? <><Check className="h-4 w-4" /> Matched</> : request?.status === 'pending' ? <><Check className="h-4 w-4" /> Sent</> : request?.status === 'declined' ? <><X className="h-4 w-4" /> Declined</> : <><Send className="h-4 w-4" /> Request</>}
                     </Button>
                   </div>
                 </div>
